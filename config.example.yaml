@@ -1,0 +1,25 @@
+device:
+  path: /dev/input/event13
+
+reload:
+  enabled: true
+  debounce_ms: 250
+
+remaps:
+  - description: right button down -> left meta down
+    input:
+      type: key
+      code: 278
+      value: 1
+    output:
+      - key: KEY_LEFTMETA
+        value: 1
+
+  - description: right button up -> left meta up
+    input:
+      type: key
+      code: 278
+      value: 0
+    output:
+      - key: KEY_LEFTMETA
+        value: 0
