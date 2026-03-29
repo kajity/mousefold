@@ -1,0 +1,10 @@
+[package]
+name = "ex-g-pro-remapper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+evdev = "0.13.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
+tokio = { version = "1.49.0", features = ["full"] }
