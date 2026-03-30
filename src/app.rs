@@ -116,9 +116,14 @@ impl Runtime {
         report_warnings(&load_result.warnings);
 
         let mouse_device = MouseDevice::open_and_grab(&load_result.config.device_selector)?;
-        let virtual_mouse =
-            VirtualMouse::build_from_source_caps(mouse_device.source_capabilities())?;
-        let virtual_keyboard = VirtualKeyboard::build(load_result.config.rules.registered_keys())?;
+        let virtual_mouse = VirtualMouse::build_from_source_caps(
+            mouse_device.source_capabilities(),
+            mouse_device.resolved_name(),
+        )?;
+        let virtual_keyboard = VirtualKeyboard::build(
+            load_result.config.rules.registered_keys(),
+            mouse_device.resolved_name(),
+        )?;
 
         log_info(&format!(
             "grabbed source device {}",
@@ -142,10 +147,14 @@ impl Runtime {
         if load_result.config.device_selector != self.config.device_selector {
             let replacement_mouse =
                 MouseDevice::open_and_grab(&load_result.config.device_selector)?;
-            let replacement_virtual_mouse =
-                VirtualMouse::build_from_source_caps(replacement_mouse.source_capabilities())?;
-            let replacement_virtual_keyboard =
-                VirtualKeyboard::build(load_result.config.rules.registered_keys())?;
+            let replacement_virtual_mouse = VirtualMouse::build_from_source_caps(
+                replacement_mouse.source_capabilities(),
+                replacement_mouse.resolved_name(),
+            )?;
+            let replacement_virtual_keyboard = VirtualKeyboard::build(
+                load_result.config.rules.registered_keys(),
+                replacement_mouse.resolved_name(),
+            )?;
 
             self.pending_mouse_events.clear();
             self.pending_keyboard_events.clear();
@@ -157,7 +166,10 @@ impl Runtime {
         }
 
         self.pending_keyboard_events.clear();
-        self.virtual_keyboard = VirtualKeyboard::build(load_result.config.rules.registered_keys())?;
+        self.virtual_keyboard = VirtualKeyboard::build(
+            load_result.config.rules.registered_keys(),
+            self.mouse_device.resolved_name(),
+        )?;
         self.config = load_result.config;
         Ok(())
     }

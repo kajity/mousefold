@@ -32,14 +32,16 @@ impl VirtualMouse {
     /// Builds a virtual mouse from source device capabilities.
     pub fn build_from_source_caps(
         caps: &SourceMouseCapabilities,
+        name: &str,
     ) -> Result<Self, VirtualMouseError> {
         let mut button_keys = AttributeSet::<KeyCode>::new();
         for key in caps.supported_keys().iter().filter(|key| key.0 >= 0x110) {
             button_keys.insert(key);
         }
 
+        let device_name = format!("mousemux Virtual Mouse for {}", name);
         let mut builder = VirtualDevice::builder()?
-            .name("mousemux Virtual Mouse")
+            .name(&device_name)
             .with_relative_axes(caps.supported_relative_axes())?;
 
         if button_keys.iter().next().is_some() {

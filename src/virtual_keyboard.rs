@@ -30,7 +30,7 @@ impl From<std::io::Error> for VirtualKeyboardError {
 
 impl VirtualKeyboard {
     /// Builds a virtual keyboard from the keys referenced by compiled rules.
-    pub fn build(keys: &[KeyCode]) -> Result<Self, VirtualKeyboardError> {
+    pub fn build(keys: &[KeyCode], name: &str) -> Result<Self, VirtualKeyboardError> {
         let mut attribute_set = AttributeSet::<KeyCode>::new();
         for key in keys {
             attribute_set.insert(*key);
@@ -38,7 +38,7 @@ impl VirtualKeyboard {
 
         Ok(Self {
             device: VirtualDevice::builder()?
-                .name("mousemux Virtual Keyboard")
+                .name(&format!("mousemux Virtual Keyboard for {}", name))
                 .with_keys(&attribute_set)?
                 .build()?,
         })
