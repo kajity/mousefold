@@ -15,6 +15,9 @@
 - 設定フォーマットは YAML
 - systemd 管理下で root 実行
 - 設定変更はホットリロード対応
+- Bluetooth マウス指定時は BlueZ 経由でデバイス名から pair / trust / connect を自動化
+- 常駐監視本体はサブコマンド無し起動とし、`monitor` は一時的な入力確認に使う
+- モード切替によりキーバインドセットを切り替えられる構成にする
 
 ## 2. 推奨モジュール分割
 
@@ -50,7 +53,22 @@
 - `next_event() -> NormalizedMouseEvent`
 - `read_capabilities() -> SourceMouseCapabilities`
 
-### 2.3 `virtual_mouse`
+### 2.3 `bluetooth`
+
+責務:
+
+- BlueZ device 名ベースの探索
+- 対象 Bluetooth マウスの pair / trust / connect
+- 接続済み判定と evdev 側起動条件の提供
+- 同名候補のうち未接続デバイスだけを接続対象に絞る
+
+主要処理:
+
+- `ensure_connected(selector) -> ConnectedBluetoothDevice`
+- `pair_if_needed(device) -> Result<()>`
+- `connect(device) -> Result<()>`
+
+### 2.4 `virtual_mouse`
 
 責務:
 
@@ -62,7 +80,7 @@
 - `build_from_capabilities(caps) -> VirtualMouse`
 - `emit_mouse(event)`
 
-### 2.4 `virtual_keyboard`
+### 2.5 `virtual_keyboard`
 
 責務:
 
@@ -74,7 +92,7 @@
 - `build(keys) -> VirtualKeyboard`
 - `emit(sequence)`
 
-### 2.5 `router`
+### 2.6 `router`
 
 責務:
 
@@ -90,7 +108,7 @@
 - 競合ルールはロード時に解決方針を確定する
 - 実行時は「最後に有効となるルール」のみ参照すると単純化できる
 
-### 2.6 `reload`
+### 2.7 `reload`
 
 責務:
 
@@ -107,9 +125,11 @@
 
 単一プロセス内で以下のタスクを持つ構成を推奨する。
 
-1. 入力イベント受信タスク
-2. 設定ファイル監視タスク
-3. 終了シグナル監視タスク
+1. CLI 引数解決
+2. 入力イベント受信タスク
+3. 設定ファイル監視タスク
+4. 終了シグナル監視タスク
+5. 必要に応じて Bluetooth 接続待ちタスク
 
 共有状態:
 
@@ -118,6 +138,7 @@
 - 仮想マウスハンドル
 - 仮想キーボードハンドル
 - 現在監視中の物理デバイス情報
+- 現在有効な Bluetooth 接続情報
 
 共有状態の更新は `Arc<RwLock<...>>` または同等の読多書少構造を想定する。
 
@@ -128,6 +149,7 @@
 - ファイル変更検知時に設定を再読込する
 - 新設定の構文検証と論理検証が通った場合のみ有効化する
 - 検証失敗時は旧設定を維持する
+- Bluetooth 設定変更時も同じ差し替え規律を適用する
 
 ### 4.2 差し替え単位
 
@@ -136,11 +158,13 @@
 - ルール集合
 - 使用キー一覧
 - 監視デバイス情報
+- Bluetooth 接続設定
 
 仮想デバイスについては以下の方針を推奨する。
 
 - 仮想キーボードは使用キーが変わる場合に再生成する
 - 仮想マウスは監視デバイスが変わるか、元デバイス capability が変わる場合に再生成する
+- Bluetooth 設定が変わる場合は adapter/device 解決と接続状態を再構築する
 
 推奨:
 
@@ -180,20 +204,56 @@
 - passthrough 対象: 移動、ホイール、未リマップボタン
 - 非対象: 複雑なジェスチャ、複数デバイス統合、マクロ DSL
 
-## 7. ログ方針
+### 6.3 モード切替
+
+- ルール集合はモード単位で保持する
+- 現在モードに対応するルール集合だけを実行時参照する
+- モード切替入力は通常リマップより先に評価する
+- 無効なモード遷移先は設定検証で落とす
+
+## 7. CLI 方針
+
+### 7.1 サブコマンド
+
+- サブコマンド無し起動
+  - 常駐監視本体
+  - systemd の `ExecStart` で使う
+- `monitor`
+  - 一時的なキー入力確認やイベント確認に使う
+  - grab や常駐前提に固定しない
+- `check`
+  - 設定の構文検証と論理検証だけを行う
+  - 実際の監視や uinput 生成は行わない
+- `reload`
+  - 実行中プロセスへ再読込要求を送る
+  - systemd の `ExecReload` から呼べる形を優先する
+
+### 7.2 設計メモ
+
+- `reload` は SIGHUP 送信または軽量な制御経路のどちらかに寄せる
+- 常駐起動だけが長寿命の evdev/uinput 管理を持つ
+- `check` / `monitor` / `reload` は短命プロセスとして設計する
+
+## 8. ログ方針
 
 ログレベル案:
 
-- `ERROR`: 起動失敗、設定読込失敗、デバイスオープン失敗、grab 失敗、uinput 生成失敗
+- `ERROR`: 起動失敗、設定読込失敗、デバイスオープン失敗、grab 失敗、uinput 生成失敗、Bluetooth adapter / pair / trust / connect 失敗
 - `WARN`: 競合ルール、ホットリロード失敗時の旧設定維持
-- `INFO`: 起動完了、対象デバイス、grab 成功、設定再読込成功
+- `INFO`: 起動完了、対象デバイス、grab 成功、設定再読込成功、Bluetooth 接続成功
 - `DEBUG`: 詳細イベントトレース、ルーティング判定
 
-## 8. YAML スキーマ案
+## 9. YAML スキーマ案
 
 ```yaml
 device:
   path: /dev/input/by-id/usb-Example_Mouse-event-mouse
+  transport: usb
+  name: Logitech G Pro Wireless
+  bluetooth:
+    auto_pair: true
+    auto_trust: true
+    auto_connect: true
 
 reload:
   enabled: true
@@ -217,9 +277,28 @@ remaps:
     output:
       - key: KEY_LEFTMETA
         value: 0
+
+modes:
+  - name: default
+    remaps: []
+  - name: fps
+    remaps: []
+
+mode_switches:
+  - input:
+      type: key
+      code: BTN_SIDE
+      value: 1
+    target_mode: fps
 ```
 
-## 9. systemd unit 案
+補足:
+
+- `transport: bluetooth` の場合は `device.name` を必須とする
+- `transport: usb` の場合は `device.path` または by-id/name 系 selector を使う
+- `device.bluetooth.adapter` や `address` は設定へ持ち込まない
+
+## 10. systemd unit 案
 
 ```ini
 [Unit]
@@ -230,6 +309,7 @@ After=systemd-udevd.service
 Type=simple
 User=root
 ExecStart=/usr/local/bin/mousefold --config /etc/mousefold/config.yaml
+ExecReload=/usr/local/bin/mousefold reload --config /etc/mousefold/config.yaml
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=yes
@@ -249,15 +329,18 @@ WantedBy=multi-user.target
 - `ProtectSystem=strict` を使う場合、読込対象パスの調整が必要
 - 設定ファイルを `/etc` に置くなら `ReadOnlyPaths` または `BindReadOnlyPaths` の調整も検討対象
 
-## 10. 実装順序案
+## 11. 実装順序案
 
-1. YAML 読込と設定バリデーション
-2. 単一マウス入力のオープンと `grab`
-3. 元デバイス capability 取得と仮想マウス生成
-4. 仮想キーボード生成
-5. 単純な 1:1 リマップ
-6. 未リマップイベントのパススルー
-7. 複数キー出力
-8. 競合検出と警告ログ
-9. ホットリロード
-10. systemd unit と運用確認
+1. 常駐起動と `check` / `monitor` / `reload` の CLI 境界を再構成
+2. YAML 読込と設定バリデーション
+3. 単一マウス入力のオープンと `grab`
+4. 元デバイス capability 取得と仮想マウス生成
+5. 仮想キーボード生成
+6. 単純な 1:1 リマップ
+7. 未リマップイベントのパススルー
+8. 複数キー出力
+9. 競合検出と警告ログ
+10. ホットリロード
+11. Bluetooth auto pair / trust / connect
+12. モード切替
+13. systemd unit と運用確認

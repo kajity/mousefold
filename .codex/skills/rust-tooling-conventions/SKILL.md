@@ -28,12 +28,14 @@ description: "このプロジェクトで Rust の実装品質を揃えるため
 ## CLI 方針
 最低限、以下を提供する。
 
-- `--config <path>`
-- 必要なら `--check-config`
-- 必要なら `--dump-effective-config`
+- `--config <path>` (常駐起動)
+- `check --config <path>`
+- `monitor --config <path>`
+- `reload --config <path>`
 
-ただし初期実装では機能を増やしすぎない。
-要件未記載のオプションは抑制する。
+サブコマンドごとの責務は混ぜない。
+常駐処理はサブコマンド無し起動へ置く。
+`check` / `monitor` / `reload` は短命コマンドとして保つ。
 
 ## エラー方針
 エラーは、原因と文脈が読めることを優先する。
@@ -46,6 +48,8 @@ description: "このプロジェクトで Rust の実装品質を揃えるため
 - grab 失敗
 - uinput 初期化失敗
 - 再読込失敗
+- Bluetooth adapter 解決失敗
+- Bluetooth pair / trust / connect 失敗
 
 ## ログ方針
 - 起動時に対象デバイスと設定パスを `INFO`
@@ -63,6 +67,8 @@ description: "このプロジェクトで Rust の実装品質を揃えるため
 - 境界の内側に閉じ込められる
 - 代替案より保守しやすい
 - プロジェクト全体を不必要に複雑にしない
+
+Bluetooth 接続制御では `bluer` を第一候補とし、`bluetooth` モジュール境界の内側へ閉じ込める。
 
 ## 推奨チェック
 変更後は必ず以下を回す。
