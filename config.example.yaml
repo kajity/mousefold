@@ -6,38 +6,44 @@ reload:
   debounce_ms: 250
 
 remaps:
-  - description: right button down -> left meta down
+  meta:
+    description: back button -> left meta
     input:
       type: key
       code: BTN_BACK
-      value: 1
     output:
       - key: KEY_LEFTMETA
-        value: 1
 
-  - description: right button up -> left meta up
+  enter:
+    description: forward button -> enter
+    input:
+      type: key
+      code: BTN_FORWARD
+    output:
+      - key: KEY_ENTER
+        hold: null
+
+  ctrl-tab:
+    description: back button -> ctrl-tab in sub mode
     input:
       type: key
       code: BTN_BACK
-      value: 0
     output:
-      - key: KEY_LEFTMETA
-        value: 0
+      - key: KEY_LEFTCTRL
+        hold: 200
+      - key: KEY_TAB
+        hold: null
 
-  - description: side button down -> enter down
-    input:
-      type: key
-      code: BTN_FORWARD
-      value: 1
-    output:
-      - key: KEY_ENTER
-        value: 1
-
-  - description: side button up -> enter up
-    input:
-      type: key
-      code: BTN_FORWARD
-      value: 0
-    output:
-      - key: KEY_ENTER
-        value: 0
+mode_switches:
+  modes:
+    - name: default
+      remaps:
+        - meta
+        - enter
+    - name: sub
+      remaps:
+        - ctrl-tab
+        - enter
+  input:
+    type: key
+    code: BTN_TASK

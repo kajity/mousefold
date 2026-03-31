@@ -255,12 +255,9 @@ device:
     auto_trust: true
     auto_connect: true
 
-reload:
-  enabled: true
-  debounce_ms: 250
-
 remaps:
-  - description: right button down -> left meta down
+  meta1: 
+    description: right button down -> left meta down
     input:
       type: key
       code: BTN_RIGHT
@@ -269,7 +266,8 @@ remaps:
       - key: KEY_LEFTMETA
         value: 1
 
-  - description: right button up -> left meta up
+  meta2:
+    description: right button up -> left meta up
     input:
       type: key
       code: BTN_RIGHT
@@ -278,18 +276,40 @@ remaps:
       - key: KEY_LEFTMETA
         value: 0
 
-modes:
-  - name: default
-    remaps: []
-  - name: fps
-    remaps: []
+  enter:
+    description: side button -> enter
+    input:
+      type: key
+      code: BTN_FORWARD
+    output:
+      - key: KEY_ENTER
+
+  ctrl-tab:
+    description: right button -> ctrl-tab
+    input:
+      type: key
+      code: BTN_RIGHT
+    output:
+      - key: KEY_LEFTCTRL
+        hold: 1000
+      - key: KEY_TAB
+        hold: null
 
 mode_switches:
-  - input:
+  modes:
+    - name: default
+      remaps: 
+        - meta1
+        - meta2
+        - enter
+    - name: sub
+      remaps:
+        - ctrl-tab
+        - enter
+
+  input:
       type: key
       code: BTN_SIDE
-      value: 1
-    target_mode: fps
 ```
 
 補足:
