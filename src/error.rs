@@ -1,3 +1,4 @@
+use crate::bluetooth::BluetoothError;
 use crate::config::ConfigError;
 use crate::device::DeviceError;
 use crate::virtual_keyboard::VirtualKeyboardError;
@@ -10,6 +11,7 @@ pub enum AppError {
     Cli(String),
     Logger(log::SetLoggerError),
     Config(ConfigError),
+    Bluetooth(BluetoothError),
     Device(DeviceError),
     Mouse(VirtualMouseError),
     Keyboard(VirtualKeyboardError),
@@ -34,6 +36,7 @@ impl fmt::Display for AppError {
             Self::Cli(message) => write!(f, "{message}"),
             Self::Logger(err) => write!(f, "failed to initialize logger: {err}"),
             Self::Config(err) => write!(f, "{err}"),
+            Self::Bluetooth(err) => write!(f, "{err}"),
             Self::Device(err) => write!(f, "{err}"),
             Self::Mouse(err) => write!(f, "{err}"),
             Self::Keyboard(err) => write!(f, "{err}"),
@@ -65,6 +68,12 @@ impl From<ConfigError> for AppError {
 impl From<DeviceError> for AppError {
     fn from(value: DeviceError) -> Self {
         Self::Device(value)
+    }
+}
+
+impl From<BluetoothError> for AppError {
+    fn from(value: BluetoothError) -> Self {
+        Self::Bluetooth(value)
     }
 }
 

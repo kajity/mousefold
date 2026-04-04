@@ -1,5 +1,6 @@
 device:
-  name: "EX-G Pro TrackBall"
+  name: EX-G Pro TrackBall
+  transport: bluetooth
 
 remaps:
   meta:

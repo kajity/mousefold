@@ -1,10 +1,12 @@
 [Unit]
 Description=Mouse-to-keyboard remapper daemon
-After=systemd-udevd.service
+After=systemd-udevd.service bluetooth.service dbus.service
+Wants=bluetooth.service
 
 [Service]
 Type=simple
 User=root
+ExecStartPre=/usr/local/bin/mousefold check --config /etc/mousefold/config.yaml
 ExecStart=/usr/local/bin/mousefold --config /etc/mousefold/config.yaml
 ExecReload=/usr/local/bin/mousefold reload --config /etc/mousefold/config.yaml
 Restart=on-failure
@@ -15,6 +17,7 @@ PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
 ReadOnlyPaths=/etc/mousefold
+ReadWritePaths=/run/mousefold
 StandardOutput=journal
 StandardError=journal
 

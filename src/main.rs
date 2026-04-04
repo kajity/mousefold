@@ -1,4 +1,5 @@
 mod app;
+mod bluetooth;
 mod cli;
 mod config;
 mod device;

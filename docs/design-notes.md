@@ -239,7 +239,7 @@
 ログレベル案:
 
 - `ERROR`: 起動失敗、設定読込失敗、デバイスオープン失敗、grab 失敗、uinput 生成失敗、Bluetooth adapter / pair / trust / connect 失敗
-- `WARN`: 競合ルール、ホットリロード失敗時の旧設定維持
+- `WARN`: 競合ルール、設定再読込失敗時の旧設定維持、Bluetooth デバイス探索の再試行
 - `INFO`: 起動完了、対象デバイス、grab 成功、設定再読込成功、Bluetooth 接続成功
 - `DEBUG`: 詳細イベントトレース、ルーティング判定
 
@@ -323,20 +323,24 @@ mode_switches:
 ```ini
 [Unit]
 Description=Mouse remapper with virtual mouse and keyboard routing
-After=systemd-udevd.service
+After=systemd-udevd.service bluetooth.service dbus.service
+Wants=bluetooth.service
 
 [Service]
 Type=simple
 User=root
+ExecStartPre=/usr/local/bin/mousefold check --config /etc/mousefold/config.yaml
 ExecStart=/usr/local/bin/mousefold --config /etc/mousefold/config.yaml
 ExecReload=/usr/local/bin/mousefold reload --config /etc/mousefold/config.yaml
 Restart=on-failure
 RestartSec=2
+RuntimeDirectory=mousefold
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/etc/mousefold
+ReadOnlyPaths=/etc/mousefold
+ReadWritePaths=/run/mousefold
 StandardOutput=journal
 StandardError=journal
 
@@ -346,8 +350,10 @@ WantedBy=multi-user.target
 
 補足:
 
-- `ProtectSystem=strict` を使う場合、読込対象パスの調整が必要
-- 設定ファイルを `/etc` に置くなら `ReadOnlyPaths` または `BindReadOnlyPaths` の調整も検討対象
+- `ExecStartPre` で設定不備を常駐起動前に落とす
+- Bluetooth 利用時は `bluetooth.service` と `dbus.service` が起動済みであることを前提にする
+- pid file は `/run/mousefold` を使うため `RuntimeDirectory=mousefold` と `ReadWritePaths=/run/mousefold` を揃える
+- `ProtectSystem=strict` を使う場合、設定ディレクトリは read-only のまま運用する
 
 ## 11. 実装順序案
 

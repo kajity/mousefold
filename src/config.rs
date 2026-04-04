@@ -4,7 +4,7 @@ use crate::router::{
 use evdev::KeyCode;
 use serde::Deserialize;
 use serde::de::{self, Deserializer};
-use serde_yaml::{Mapping, Value};
+use serde_yaml::Mapping;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
@@ -15,7 +15,34 @@ use std::str::FromStr;
 pub struct ActiveConfig {
     pub source_path: PathBuf,
     pub device_selector: DeviceSelector,
+    pub device_transport: DeviceTransport,
+    pub bluetooth: Option<BluetoothConfig>,
     pub rules: CompiledRules,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeviceTransport {
+    #[default]
+    Usb,
+    Bluetooth,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BluetoothConfig {
+    pub auto_pair: bool,
+    pub auto_trust: bool,
+    pub auto_connect: bool,
+}
+
+impl Default for BluetoothConfig {
+    fn default() -> Self {
+        Self {
+            auto_pair: true,
+            auto_trust: true,
+            auto_connect: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,18 +135,30 @@ impl From<serde_yaml::Error> for ConfigError {
 #[derive(Debug, Deserialize)]
 struct ConfigFile {
     device: RawDeviceConfig,
-    #[serde(rename = "reload", default)]
-    _reload: Option<Value>,
     remaps: Mapping,
     #[serde(default)]
     mode_switches: Option<ModeSwitchesConfig>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct RawDeviceConfig {
     path: Option<PathBuf>,
     by_id: Option<PathBuf>,
     name: Option<String>,
+    #[serde(default)]
+    transport: DeviceTransport,
+    #[serde(default)]
+    bluetooth: Option<RawBluetoothConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RawBluetoothConfig {
+    #[serde(default = "default_true")]
+    auto_pair: bool,
+    #[serde(default = "default_true")]
+    auto_trust: bool,
+    #[serde(default = "default_true")]
+    auto_connect: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -199,7 +238,9 @@ fn parse_config_content(path: &Path, content: &str) -> Result<LoadResult, Config
     Ok(LoadResult {
         config: ActiveConfig {
             source_path: path.to_path_buf(),
-            device_selector: into_selector(parsed.device)?,
+            device_selector: into_selector(&parsed.device)?,
+            device_transport: parsed.device.transport,
+            bluetooth: into_bluetooth_config(&parsed.device)?,
             rules,
         },
         warnings,
@@ -508,18 +549,62 @@ fn validate_device_config(device: &RawDeviceConfig) -> Result<(), ConfigError> {
         ));
     }
 
+    if device.transport == DeviceTransport::Bluetooth {
+        if device.name.is_none() {
+            return Err(ConfigError::Validation(
+                "device.transport=bluetooth requires device.name".to_string(),
+            ));
+        }
+        if device.path.is_some() || device.by_id.is_some() {
+            return Err(ConfigError::Validation(
+                "device.transport=bluetooth does not support device.path or device.by_id"
+                    .to_string(),
+            ));
+        }
+    }
+
+    if device.bluetooth.is_some() && device.transport != DeviceTransport::Bluetooth {
+        return Err(ConfigError::Validation(
+            "device.bluetooth requires device.transport=bluetooth".to_string(),
+        ));
+    }
+
     Ok(())
 }
 
-fn into_selector(device: RawDeviceConfig) -> Result<DeviceSelector, ConfigError> {
-    match (device.path, device.by_id, device.name) {
-        (Some(path), None, None) => Ok(DeviceSelector::Path(path)),
-        (None, Some(path), None) => Ok(DeviceSelector::ById(path)),
-        (None, None, Some(name)) => Ok(DeviceSelector::Name(name)),
+fn into_selector(device: &RawDeviceConfig) -> Result<DeviceSelector, ConfigError> {
+    match (&device.path, &device.by_id, &device.name) {
+        (Some(path), None, None) => Ok(DeviceSelector::Path(path.clone())),
+        (None, Some(path), None) => Ok(DeviceSelector::ById(path.clone())),
+        (None, None, Some(name)) => Ok(DeviceSelector::Name(name.clone())),
         _ => Err(ConfigError::Validation(
             "device must specify exactly one of path, by_id, or name".to_string(),
         )),
     }
+}
+
+fn into_bluetooth_config(device: &RawDeviceConfig) -> Result<Option<BluetoothConfig>, ConfigError> {
+    if device.transport != DeviceTransport::Bluetooth {
+        return Ok(None);
+    }
+
+    let config = device.bluetooth.clone().unwrap_or(RawBluetoothConfig {
+        auto_pair: true,
+        auto_trust: true,
+        auto_connect: true,
+    });
+
+    if !config.auto_connect && (config.auto_pair || config.auto_trust) {
+        return Err(ConfigError::Validation(
+            "device.bluetooth.auto_pair/auto_trust require auto_connect=true".to_string(),
+        ));
+    }
+
+    Ok(Some(BluetoothConfig {
+        auto_pair: config.auto_pair,
+        auto_trust: config.auto_trust,
+        auto_connect: config.auto_connect,
+    }))
 }
 
 fn describe_input(input: MouseButtonTrigger) -> String {
@@ -559,6 +644,10 @@ fn is_supported_button_code(code: KeyCode) -> bool {
             | KeyCode::BTN_BACK
             | KeyCode::BTN_TASK
     )
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -773,5 +862,89 @@ remaps:
             .expect("release mapping");
 
         assert_eq!(release[0].hold, HoldBehavior::FollowInput(120));
+    }
+
+    #[test]
+    fn bluetooth_transport_loads_default_connection_flags() {
+        let result = parse_config_content(
+            Path::new("/tmp/test.yaml"),
+            r#"
+device:
+  name: "Example Mouse"
+  transport: bluetooth
+remaps:
+  enter:
+    input:
+      type: key
+      code: BTN_FORWARD
+    output:
+      - key: KEY_ENTER
+"#,
+        )
+        .expect("config should parse");
+
+        assert_eq!(result.config.device_transport, DeviceTransport::Bluetooth);
+        assert_eq!(
+            result.config.bluetooth,
+            Some(BluetoothConfig {
+                auto_pair: true,
+                auto_trust: true,
+                auto_connect: true,
+            })
+        );
+    }
+
+    #[test]
+    fn bluetooth_transport_rejects_non_name_selector() {
+        let err = parse_config_content(
+            Path::new("/tmp/test.yaml"),
+            r#"
+device:
+  by_id: "/dev/input/by-id/example"
+  transport: bluetooth
+remaps:
+  enter:
+    input:
+      type: key
+      code: BTN_FORWARD
+    output:
+      - key: KEY_ENTER
+"#,
+        )
+        .expect_err("config should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("device.transport=bluetooth requires device.name")
+                || err
+                    .to_string()
+                    .contains("does not support device.path or device.by_id")
+        );
+    }
+
+    #[test]
+    fn bluetooth_section_requires_bluetooth_transport() {
+        let err = parse_config_content(
+            Path::new("/tmp/test.yaml"),
+            r#"
+device:
+  name: "Example Mouse"
+  bluetooth:
+    auto_connect: true
+remaps:
+  enter:
+    input:
+      type: key
+      code: BTN_FORWARD
+    output:
+      - key: KEY_ENTER
+"#,
+        )
+        .expect_err("config should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("device.bluetooth requires device.transport=bluetooth")
+        );
     }
 }

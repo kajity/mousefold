@@ -6,8 +6,9 @@
 
 - Single-device mouse capture with `grab`
 - YAML-based remap rules
+- Bluetooth device selection with BlueZ-backed pair / trust / connect
 - Separate virtual mouse and virtual keyboard outputs
-- Hot reload with rollback on invalid config
+- Manual `reload` with rollback on invalid config
 - Foreground operation for systemd-managed deployments
 
 ## Usage
@@ -37,9 +38,12 @@ cargo run -- reload --config ./config.example.yaml
 ## Requirements
 
 - Linux with `evdev` and `uinput`
+- BlueZ / D-Bus when `transport: bluetooth` is used
 - Root privileges
 - A systemd-based environment for service deployment
 
 ## Service
 
 An example unit file is available at `mousefold.service`.
+It validates the config with `ExecStartPre`, starts after `bluetooth.service` / `dbus.service`,
+and uses `ExecReload` for manual config reload.

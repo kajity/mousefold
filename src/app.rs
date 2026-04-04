@@ -1,5 +1,6 @@
+use crate::bluetooth::ensure_connected;
 use crate::cli::{Cli, Command};
-use crate::config::{ConfigWarning, LoadResult, load_config};
+use crate::config::{ActiveConfig, ConfigWarning, DeviceSelector, LoadResult, load_config};
 use crate::device::{MouseDevice, NormalizedMouseEvent};
 use crate::error::AppError;
 use crate::router::{HoldBehavior, KeyStroke, RoutedAction, route};
@@ -35,9 +36,10 @@ fn run_check(config_path: &Path) -> Result<(), AppError> {
     let load_result = load_config(config_path)?;
     report_warnings(&load_result.warnings);
     info!(
-        "config OK: {} ({})",
+        "config OK: {} ({}, {})",
         config_path.display(),
-        load_result.config.device_selector.describe()
+        load_result.config.device_selector.describe(),
+        describe_device_transport(&load_result.config)
     );
     Ok(())
 }
@@ -45,12 +47,15 @@ fn run_check(config_path: &Path) -> Result<(), AppError> {
 async fn run_monitor(config_path: &Path) -> Result<(), AppError> {
     let load_result = load_config(config_path)?;
     report_warnings(&load_result.warnings);
+    ensure_bluetooth_ready(&load_result.config).await?;
+    MouseDevice::wait_until_available(&load_result.config.device_selector).await?;
 
     let mut mouse_device = MouseDevice::open_for_monitor(&load_result.config.device_selector)?;
     info!(
-        "monitoring config={} selector={} resolved_device={} ({})",
+        "monitoring config={} selector={} transport={} resolved_device={} ({})",
         config_path.display(),
         load_result.config.device_selector.describe(),
+        describe_device_transport(&load_result.config),
         mouse_device.resolved_path().display(),
         mouse_device.resolved_name()
     );
@@ -92,13 +97,14 @@ fn run_reload_command(config_path: &Path) -> Result<(), AppError> {
 
 async fn run_daemon(config_path: &Path) -> Result<(), AppError> {
     let load_result = load_config(config_path)?;
-    let mut app = App::from_load_result(load_result)?;
+    let mut app = App::from_load_result(load_result).await?;
     let _pid_file = PidFileGuard::create(config_path)?;
 
     info!(
-        "started with config={} selector={} resolved_device={} ({})",
+        "started with config={} selector={} transport={} resolved_device={} ({})",
         app.config.source_path.display(),
         app.config.device_selector.describe(),
+        describe_device_transport(&app.config),
         app.runtime.mouse_device.resolved_path().display(),
         app.runtime.mouse_device.resolved_name()
     );
@@ -167,11 +173,13 @@ struct ScheduledRelease {
 }
 
 impl App {
-    fn from_load_result(load_result: LoadResult) -> Result<Self, AppError> {
+    async fn from_load_result(load_result: LoadResult) -> Result<Self, AppError> {
         report_warnings(&load_result.warnings);
         let (release_tx, release_rx) = unbounded_channel();
 
         let config = load_result.config;
+        ensure_bluetooth_ready(&config).await?;
+        MouseDevice::wait_until_available(&config.device_selector).await?;
         let mouse_device = MouseDevice::open_and_grab(&config.device_selector)?;
         let virtual_mouse = VirtualMouse::build_from_source_caps(
             mouse_device.source_capabilities(),
@@ -236,6 +244,8 @@ impl App {
         let load_result = load_config(&self.config.source_path)?;
         report_warnings(&load_result.warnings);
         let next_config = load_result.config;
+        ensure_bluetooth_ready(&next_config).await?;
+        MouseDevice::wait_until_available(&next_config.device_selector).await?;
 
         if next_config.device_selector != self.config.device_selector {
             let replacement_mouse = MouseDevice::open_and_grab(&next_config.device_selector)?;
@@ -586,4 +596,28 @@ fn notify_mode_change(mode_name: &str) {
     {
         warn!("failed to send desktop notification for mode switch: {err}");
     }
+}
+
+fn describe_device_transport(config: &crate::config::ActiveConfig) -> String {
+    match (&config.device_transport, &config.bluetooth) {
+        (crate::config::DeviceTransport::Usb, _) => "transport=usb".to_string(),
+        (crate::config::DeviceTransport::Bluetooth, Some(bluetooth)) => format!(
+            "transport=bluetooth auto_pair={} auto_trust={} auto_connect={}",
+            bluetooth.auto_pair, bluetooth.auto_trust, bluetooth.auto_connect
+        ),
+        (crate::config::DeviceTransport::Bluetooth, None) => "transport=bluetooth".to_string(),
+    }
+}
+
+async fn ensure_bluetooth_ready(config: &ActiveConfig) -> Result<(), AppError> {
+    let Some(bluetooth) = &config.bluetooth else {
+        return Ok(());
+    };
+
+    let DeviceSelector::Name(device_name) = &config.device_selector else {
+        return Ok(());
+    };
+
+    ensure_connected(device_name, bluetooth).await?;
+    Ok(())
 }

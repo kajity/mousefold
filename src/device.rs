@@ -2,8 +2,13 @@ use crate::config::DeviceSelector;
 use evdev::{
     AttributeSet, Device, EventStream, EventSummary, InputEvent, KeyCode, RelativeAxisCode,
 };
+use log::warn;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use tokio::time::{Duration, sleep};
+
+const DEVICE_RESOLVE_RETRY_ATTEMPTS: usize = 10;
+const DEVICE_RESOLVE_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug)]
 pub struct SourceMouseCapabilities {
@@ -81,6 +86,33 @@ impl From<std::io::Error> for DeviceError {
 }
 
 impl MouseDevice {
+    /// Waits for a selector to become resolvable before opening the device.
+    pub async fn wait_until_available(selector: &DeviceSelector) -> Result<(), DeviceError> {
+        for attempt in 1..=DEVICE_RESOLVE_RETRY_ATTEMPTS {
+            match resolve_device(selector) {
+                Ok(_) => return Ok(()),
+                Err(err) if should_retry_resolution(selector, &err) => {
+                    if attempt == DEVICE_RESOLVE_RETRY_ATTEMPTS {
+                        return Err(err);
+                    }
+
+                    warn!(
+                        "device resolve attempt {attempt}/{} for {} failed: {err}; retrying in {}s",
+                        DEVICE_RESOLVE_RETRY_ATTEMPTS,
+                        selector.describe(),
+                        DEVICE_RESOLVE_RETRY_DELAY.as_secs()
+                    );
+                    sleep(DEVICE_RESOLVE_RETRY_DELAY).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(DeviceError::NotFound {
+            selector: selector.describe(),
+        })
+    }
+
     /// Opens the configured mouse, captures its capabilities, and grabs the device.
     pub fn open_and_grab(selector: &DeviceSelector) -> Result<Self, DeviceError> {
         Self::open(selector, true)
@@ -153,6 +185,13 @@ fn resolve_device(selector: &DeviceSelector) -> Result<(PathBuf, Device), Device
     }
 }
 
+fn should_retry_resolution(selector: &DeviceSelector, err: &DeviceError) -> bool {
+    matches!(
+        (selector, err),
+        (DeviceSelector::Name(_), DeviceError::NotFound { .. })
+    )
+}
+
 fn read_source_capabilities(device: &Device) -> SourceMouseCapabilities {
     let mut supported_keys = AttributeSet::<KeyCode>::new();
     if let Some(keys) = device.supported_keys() {
@@ -171,5 +210,30 @@ fn read_source_capabilities(device: &Device) -> SourceMouseCapabilities {
     SourceMouseCapabilities {
         supported_keys,
         supported_relative_axes,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn name_selector_not_found_is_retryable() {
+        let selector = DeviceSelector::Name("Example Mouse".to_string());
+        let err = DeviceError::NotFound {
+            selector: selector.describe(),
+        };
+
+        assert!(should_retry_resolution(&selector, &err));
+    }
+
+    #[test]
+    fn path_selector_not_found_is_not_retryable() {
+        let selector = DeviceSelector::Path(PathBuf::from("/dev/input/event999"));
+        let err = DeviceError::NotFound {
+            selector: selector.describe(),
+        };
+
+        assert!(!should_retry_resolution(&selector, &err));
     }
 }
